@@ -3,7 +3,6 @@ import plotly.graph_objects as go
 import pandas as pd
 import uuid
 from collections import Counter
-import io
 
 # Kütüphane Kontrolü
 try:
@@ -24,7 +23,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🚛 Mobil Tır Yükleme Asistanı")
-st.caption("Optimum Sıkıştırma Modu (v7.1)")
+st.caption("Optimum Sıkıştırma Modu (v7.2 - Hacim Destekli)")
 
 # --- YAN MENÜ ---
 with st.sidebar:
@@ -76,6 +75,10 @@ with tab_giris:
         y_en = c1.number_input("En", 90, key="y_en"); y_boy = c2.number_input("Boy", 190, key="y_boy"); y_yuk = c3.number_input("Yük", 25, key="y_yuk")
         y_color = c4.color_picker("Renk", "#ADD8E6", key="y_c")
 
+    # Set Hacmi Hesapla
+    set_hacim = ((b_en*b_boy*b_yuk) + (h_en*h_boy*h_yuk) + (y_en*y_boy*y_yuk)) / 1_000_000
+    st.info(f"ℹ️ Bir takımın toplam hacmi: {set_hacim:.3f} m³")
+
     if st.button("Listeye Ekle (+)", type="primary"):
         grup_id = str(uuid.uuid4())[:8]
         for i in range(adet):
@@ -83,7 +86,7 @@ with tab_giris:
             st.session_state.cargo.append({"ad": set_ad, "tip": "Baza", "en": b_en, "boy": b_boy, "yuk": b_yuk, "kg": 40, "tid": tid, "lb": 100, "color": b_color, "orig_dim": (b_en, b_boy, b_yuk)})
             st.session_state.cargo.append({"ad": set_ad, "tip": "Başlık", "en": h_en, "boy": h_boy, "yuk": h_yuk, "kg": 15, "tid": tid, "lb": 100, "color": h_color, "orig_dim": (h_en, h_boy, h_yuk)})
             st.session_state.cargo.append({"ad": set_ad, "tip": "Yatak", "en": y_en, "boy": y_boy, "yuk": y_yuk, "kg": 20, "tid": tid, "lb": 0, "color": y_color, "orig_dim": (y_en, y_boy, y_yuk)})
-        st.success(f"{adet} takım eklendi.")
+        st.success(f"{adet} takım eklendi. (Toplam eklenen hacim: {set_hacim * adet:.2f} m³)")
 
     if len(st.session_state.cargo) > 0:
         if st.button("Listeyi Temizle 🗑️"):
@@ -103,13 +106,11 @@ def run_packer(items_to_pack, bin_dims, rotasyon_izni):
     for item in items_to_pack:
         unique_id = f"{item['tid']}|{item['tip']}|{uuid.uuid4()}"
         item_map[unique_id] = item
-        # rotation=True/False ayarı py3dbp kütüphanesinin güncel sürümlerinde desteklenir
-        # Desteklemiyorsa boyutları manuel değiştirmek gerekir, burada standart kullanıyoruz.
+        # rotation parametresi kütüphaneye göre değişebilir, burada standart boyut kullanıyoruz.
         p = Item(unique_id, float(item['en']), float(item['boy']), float(item['yuk']), float(item['kg']))
         p.loadbear = item['lb']
         packer.add_item(p)
     
-    # number_of_decimals: Hassasiyet
     packer.pack(bigger_first=True, distribute_items=False, number_of_decimals=0)
     return packer, item_map
 
@@ -167,7 +168,10 @@ with tab_simulasyon:
                 orig = item_map_final[item.name]
                 x, y, z = [float(k) for k in item.position]
                 w, h, d = [float(k) for k in item.get_dimension()]
-                dolu_hacim += (w*h*d)
+                
+                # Hacim Hesabı (cm3 -> m3)
+                urun_hacim_m3 = (w * h * d) / 1_000_000
+                dolu_hacim += urun_hacim_m3
 
                 # Yön
                 orig_h = float(orig['orig_dim'][2])
@@ -178,12 +182,13 @@ with tab_simulasyon:
                     "Set ID": orig['tid'].split('_')[1],
                     "Parça": orig['tip'],
                     "Durum": durus,
+                    "Hacim (m3)": f"{urun_hacim_m3:.3f}",
                     "Konum (X,Y,Z)": f"{x:.0f}, {y:.0f}, {z:.0f}",
                     "Boyut (E,B,Y)": f"{w:.0f}x{h:.0f}x{d:.0f}"
                 })
 
                 # Kutu Çiz
-                fig.add_trace(go.Mesh3d(x=[x, x+w, x+w, x, x, x+w, x+w, x], y=[y, y, y+h, y+h, y, y, y+h, y+h], z=[z, z, z, z, z+d, z+d, z+d, z+d], i=[7, 0, 0, 0, 4, 4, 6, 6, 4, 0, 3, 2], j=[3, 4, 1, 2, 5, 6, 5, 2, 0, 1, 6, 3], k=[0, 7, 2, 3, 6, 7, 1, 1, 5, 5, 7, 6], color=orig['color'], opacity=1, flatshading=True, name=orig['tip'], hovertext=f"{orig['tip']}<br>{durus}", hoverinfo='text'))
+                fig.add_trace(go.Mesh3d(x=[x, x+w, x+w, x, x, x+w, x+w, x], y=[y, y, y+h, y+h, y, y, y+h, y+h], z=[z, z, z, z, z+d, z+d, z+d, z+d], i=[7, 0, 0, 0, 4, 4, 6, 6, 4, 0, 3, 2], j=[3, 4, 1, 2, 5, 6, 5, 2, 0, 1, 6, 3], k=[0, 7, 2, 3, 6, 7, 1, 1, 5, 5, 7, 6], color=orig['color'], opacity=1, flatshading=True, name=orig['tip'], hovertext=f"{orig['tip']}<br>{durus}<br>{urun_hacim_m3:.3f} m3", hoverinfo='text'))
                 
                 # Wireframe
                 wx = [x, x+w, x+w, x, x, x+w, x+w, x, x, x+w, x+w, x, x, x, x+w, x+w]
@@ -196,11 +201,12 @@ with tab_simulasyon:
 
             # METRİKLER
             st.divider()
-            c1, c2, c3 = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
             c1.metric("✅ Tam Set", f"{sigan_set_sayisi}")
             c2.metric("❌ Dışarıda", f"{len({i['tid'] for i in st.session_state.cargo}) - sigan_set_sayisi}")
-            doluluk = ((dolu_hacim/1e6) / tir_hacim_m3) * 100
-            c3.metric("Doluluk", f"%{doluluk:.1f}")
+            c3.metric("Yüklenen Hacim", f"{dolu_hacim:.2f} m³")
+            doluluk_orani = (dolu_hacim / tir_hacim_m3) * 100
+            c4.metric("Doluluk Oranı", f"%{doluluk_orani:.1f}")
 
             # --- RAPOR İNDİRME ---
             if csv_data:
